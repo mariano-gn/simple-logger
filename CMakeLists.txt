@@ -6,11 +6,26 @@ if("${CMAKE_BINARY_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
    message(FATAL_ERROR "In-source builds are not allowed. Create a directory, and build within it.")
 endif()
 
-include_directories(".")
+include_directories(
+    "."
+    "./patterns" 
+)
 
-set(SOURCES "test-main.cpp")
+set(SOURCES 
+    "logger.cpp"
+    "test-main.cpp"
+)
 
-add_executable(${TARGET_NAME} ${SOURCES})
+#Do this to visualize the headers on VS solutions or Xcode projects.
+set(HEADERS
+    "logger.h"
+    "util.h"
+    "patterns/non-copyable.h"
+    "patterns/simple-assert.h"
+    "patterns/singleton.h"
+)
+
+add_executable(${TARGET_NAME} ${SOURCES} ${HEADERS})
 
 # c++11
 if (${CMAKE_VERSION} VERSION_GREATER 3.1.0)
