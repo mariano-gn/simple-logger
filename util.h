@@ -67,9 +67,11 @@ namespace util {
     } // namespace flag
 
     namespace string {
-        template<typename Head>
-        inline void concat_ss(std::stringstream& ss, Head&& h) {
-            ss << h;
+        template<typename... Args>
+        inline std::string concat(Args&& ...args) {
+            std::stringstream ss;
+            concat_ss(ss, std::forward<Args>(args)...);
+            return ss.str();
         }
 
         template<typename Head, typename... Tail>
@@ -77,12 +79,10 @@ namespace util {
             ss << h;
             concat_ss(ss, std::forward<Tail>(args)...);
         }
-
-        template<typename... Args>
-        inline std::string concat(Args&& ...args) {
-            std::stringstream ss;
-            concat_ss(ss, std::forward<Args>(args)...);
-            return ss.str();
+        
+        template<typename Head>
+        inline void concat_ss(std::stringstream& ss, Head&& h) {
+            ss << h;
         }
     } // namespace string
 } // namespace util

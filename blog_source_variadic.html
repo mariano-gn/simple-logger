@@ -1,0 +1,175 @@
+<a href="#es">Español</a>
+<a id="top"></a>
+<br>
+Hello! A new post, this time, talking about Variadic Templates and a utility function that will be used on the Logger (which, will take more time to present that I thought).
+&nbsp;
+Note, for those of you speaking in English, you can refer to <a href="https://en.wikipedia.org/wiki/Variadic_template">here (Wikipedia)</a>, <a href="http://www.cplusplus.com/articles/EhvU7k9E/">here (cplusplus.com)</a> or <a href="https://msdn.microsoft.com/en-us/library/dn439779.aspx">here (MSDN)</a> for articles on variadic templates. I'm doing the article on both languages for completions sake, but there are plenty of resources in English and I was more interested on doing it for the Spanish speakers. 
+&nbsp;
+Variadic templates are a new feature introduced in C++ with the C++11 standard. Their key point is to allow a template take a variable number of arguments. Its usage resembles variadic macros, but with typing and compilation instead of text preprocessing. The best way to see it in action is by an example.
+&nbsp;
+I've used it to create a function that concatenates an arbitrary number of arguments into one string. If you ever used it, looks like the <code>print</code> function from Python 2.x (it also resembles a potential <code>printf</code> implementation). In terms of wrapping your head to the usage of variadic templates, I found useful to think of Haskell like recursion or list representations:
+<ul>
+    <li>The base list is the empty list (depending on what you want to control, the base list can be the list with 1 element)</li>
+    <li>Any list contains a <i>head</i> which is a single element and a <i>tail</i> which is a list with the rest of the elements.</li>
+</ul>
+With this in mind, this is the utility function, used to concatenate (and, convert to string) any arbitrary object that implements the <code>operator&lt;&lt;</code> with an <code>std::ostream</code>. 
+[code language="cpp"]
+namespace util {
+    namespace string {
+        template<typename... Args>
+        inline std::string concat(Args&& ...args) {
+            std::stringstream ss;
+            concat_ss(ss, std::forward<Args>(args)...);
+            return ss.str();
+        }
+[/code]
+First line after the definition of the namespaces is the declaration of the template arguments of the function. As you can see the ellipsis is added between the <code>typename</code> declaration and the new concept of Parameter Pack. <code>Args</code>, in this context represents the entire list of arguments this function will have. 
+&nbsp;
+The following line, the function signature, not only uses parameter packs but also universal references (<code>&amp;&amp;</code>) so to avoid unnecessary copies using another feature of C++11 called <i>move sematics</i>. It declares a function by the name <code>concat</code> that is templatized not only on the type of its arguments but also in its number.
+&nbsp;
+Its body creates an <code>std::stringstream</code> object and then proceeds to call another function (see below) called <code>concat_ss</code> with the <code>std::stringstream</code> and the arguments, but note that the ellipsis are now on the right side of the <code>args</code> variable. From Wikipedia:
+<cite>
+     The ellipsis (...) operator has two roles. When it occurs to the left of the name of a parameter, it declares a parameter pack. Using the parameter pack, the user can bind zero or more arguments to the variadic template parameters. Parameter packs can also be used for non-type parameters. By contrast, when the ellipsis operator occurs to the right of a template or function call argument, it unpacks the parameter packs into separate arguments, [...]. In practice, the use of an ellipsis operator in the code causes the whole expression that precedes the ellipsis to be repeated for every subsequent argument unpacked from the argument pack; and all these expressions will be separated by a comma.
+</cite>
+That means if we call <code>concat</code> this way:
+[code language="cpp"]
+util::string::concat("The answer is ", 42, " or maybe ", 42.5);
+[/code]
+it will possibly be compiled as:
+[code language="cpp"]
+        inline std::string concat(const char[]&& a1, int&& a2, const char[]&& a3, double&& a4) {
+            std::stringstream ss;
+            concat_ss(ss, std::forward<const char[]>(a1), 
+                          std::forward<int>(a2), 
+                          std::forward<const char[]>(a3), 
+                          std::forward<double>(a4));
+            return ss.str();
+        }
+[/code]
+You can safely ignore the universal references and the <code>std::forward</code> calls for now. Rest assure, are there for a reason, think of it as a way to telling "this object might be temporal or not, treat it accordingly, if it's temporal don't copy it from the caller to the callee (move semantics)" (it's not exactly like this, but it's good for now).
+&nbsp;
+Now, moving on to that <code>concat_ss</code> function:
+[code language="cpp"]
+        template<typename Head, typename... Tail>
+        inline void concat_ss(std::stringstream& ss, Head&& h, Tail&&... args) {
+            ss << h;
+            concat_ss(ss, std::forward<Tail>(args)...);
+        }
+[/code]
+Here comes the Haskell list mind set, defining the template as having 2 type arguments, <code>Head</code> as a standard one and <code>Tail</code> as another parameter pack, we are able to address the first parameter independently. This is done on the body, streaming the first parameter to the <code>std::stringstream</code> and calling itself again, but with one less element.
+&nbsp;
+<i>Where does it ends?</i>
+[code language="cpp"]
+        template<typename Head>
+        inline void concat_ss(std::stringstream& ss, Head&& h) {
+            ss << h;
+        }
+[/code]
+Another version of <code>concat_ss</code> that has no tail, closes the recursion, and also ensures that <code>concat</code> can't be called with no argument:
+&nbsp;
+<i>Avoid call to <code>concat</code> with no arguments.</i>
+&nbsp;
+Since calling <code>concat</code> with no arguments equals to calling <code>concat_ss</code> only with the <code>std::stringstream</code> the code fails to compile, since the only defined functions have exactly one extra parameter (second version) or more than one (first version).
+&nbsp; 
+<i>Close the recursion</i>
+&nbsp;
+The call to <code>concat_ss</code> from <code>concat</code> defines a function with N arguments, which in turns calls another <code>concat_ss</code> function defined and receiving N-1 arguments. This process continues until N is equal to 2. Then, the first argument is streamed and the tail now is only a single element, making the match on the non-recursive and single-extra-argument version of <code>concat_ss</code>. Using the previous example:
+<ol>
+    <li><code>util::string::concat_ss(ss, "The answer is ", 42, " or maybe ", 42.5)</code> will stream "The answer is " and then call itself,</li>
+    <li><code>util::string::concat_ss(ss, 42, " or maybe ", 42.5)</code> will stream 42 and then call itself,</li>
+    <li><code>util::string::concat_ss(ss, " or maybe ", 42.5)</code> will stream " or maybe " and then call the non-recursive version of <code>concat_ss</code> that takes only one parameter, being in this case, 42.5.</li>
+</ol>
+I think that's it, if you're still reading and still interested in 'move semantics', <a href="http://stackoverflow.com/questions/3106110/what-are-move-semantics">this StackOverflow answer</a> explains it in extreme detail. I might try to do a post myself, but I think its better explained by others as Stephan T. Lavavej (which gave input on SO) or <a href="https://isocpp.org/blog/2012/11/universal-references-in-c11-scott-meyers">Scott Meyers</a>, maybe a good translation to Spanish will do :)
+&nbsp;
+Look for the sources <a href="https://github.com/mariano-gn/simple-logger">here</a>. <code>concat</code> is part of the utilitary functions defined in <code>util.h</code>. As you can see, the code for the Logger is done, I just need to present a few concepts before presenting it by itself.
+&nbsp;
+Cheers!
+<br>
+<a href="#top">Back to Top</a>
+<hr>
+<a id="es"></a>
+<br>
+¡Hola! Nuevo artículo, esta vez, hablando sobre Variadic Templates y una función utilitaria que se va a usar en el Logger (el cual, va a tardar un poco más de tiempo en presentarse de lo que pensé).
+&nbsp;
+Como comentaba en la sección en inglés, en ese idioma hay bastante más recurso, mejor calificado para aprender sobre el tema, pero en Español no vi tanto, por ello quise hacer un post sobre Variadic Templates :).
+&nbsp;
+Son una nueva feature de C++ introducida con el estándar C++11. El punto clave es que permiten definir funciones/métodos/clases templatizadas utilizando un número variable de parámetros. Son como los Variadic Macros, pero fuertemente tipados y con compilación en lugar de un preprocesado de texto. La mejor manera de verlos en acción es con un ejemplo. 
+&nbsp;
+En este caso, creé una función que concatena un número arbitrario de parámetros en un solo string. Si alguna vez la usaste, es parecido a usar la función <code>print</code> de Python 2.x (también se podría decir que se parece a una posible implementación de <code>printf</code>). Para tratar de hacerse una idea de cómo usar los templates variádicos, yo encontré útil pensar en las listas de Haskell y la recursión:
+<ul>
+    <li>La lista base, es la lista vacía (aunque dependiendo de qué quieras controlar, podría ser la lista con 1 solo elemento)</li>
+    <li>Cualquier lista contiene un <i>head</i> (Cabeza) que es un elemento individual y un <i>tail</i> (Cola) que es una lista con los elementos restantes.</li>
+</ul>
+Con eso en mente, esta es la función utilitaria, usada para concatenar (y, convertir a string) cualquier objeto arbitrario que implemente <code>operator&lt;&lt;</code> con un <code>std::ostream</code>. 
+[code language="cpp"]
+namespace util {
+    namespace string {
+        template<typename... Args>
+        inline std::string concat(Args&& ...args) {
+            std::stringstream ss;
+            concat_ss(ss, std::forward<Args>(args)...);
+            return ss.str();
+        }
+[/code]
+Primera línea después de la definición de los namespaces es la declaración de los argumentos de template de la función. Como ves, los puntos suspensivos se agregan entre la declaración <code>typename</code> y el nuevo concepto de Parameter Pack. <code>Args</code>, en este contexto, representa la lista entera de argumentos que esta función va a tener.
+&nbsp;
+La siguiente línea, la firma de la función, no solo usa "parameter packs" sino que además <i>universal references</i> (<code>&amp;&amp;</code>) para evitar copias innecesarias, usando otra feature de C++11 llamada <i>move sematics</i>. Declara una función con el nombre de <code>concat</code> que es un template no solo en el tipo de sus argumentos, sino también en su número.
+&nbsp;
+En el cuerpo, crea un <code>std::stringstream</code> y procede a llamar otra función (más abajo) llamada <code>concat_ss</code> con el <code>std::stringstream</code> y los argumentos, pero en este caso, los puntos suspensivos están a la derecha de la variable <code>args</code>. Traducido de Wikipedia:
+<cite>
+     El operador puntos suspensivos (...) tiene 2 roles. Cuando aparece a la izquera del nombre de un parámetro, declara un parameter pack. Usando este parameter pack, el usuario puede ligar cero o más argumentos a los parámetros variádicos del template. Los parameter packs pueden usarse también para parámetros que no sean de tipos. En contraste, cuando el operador está a la derecha de un argumento de template o de llamada a función, desempaqueta el parameter pack en argumentos separados, [...]. En la práctica, el uso del operador en el código, causa que toda la expresión que lo precede sea repetida por cada argumento desempaquetado del parameter pack; y todas esas expresiones serán separadas por comas.
+</cite>
+Significa que si llamamos <code>concat</code> así:
+[code language="cpp"]
+util::string::concat("The answer is ", 42, " or maybe ", 42.5);
+[/code]
+puede ser posiblemente compilada así:
+[code language="cpp"]
+        inline std::string concat(const char[]&& a1, int&& a2, const char[]&& a3, double&& a4) {
+            std::stringstream ss;
+            concat_ss(ss, std::forward<const char[]>(a1), 
+                          std::forward<int>(a2), 
+                          std::forward<const char[]>(a3), 
+                          std::forward<double>(a4));
+            return ss.str();
+        }
+[/code]
+Por ahora, a olvidarse de las <i>universal references</i> y de las llamadas a <code>std::forward</code>. Están por una razón, se podría interpretar como decirle al compilador "este objeto puede ser temporal o no, tratalo acorde, si es temporal no lo copies desde la función que llama a la que es llamada (move semantics)" (no es exactamente así, pero por ahora sirve).
+&nbsp;
+Ahora, la función <code>concat_ss</code>:
+[code language="cpp"]
+        template<typename Head, typename... Tail>
+        inline void concat_ss(std::stringstream& ss, Head&& h, Tail&&... args) {
+            ss << h;
+            concat_ss(ss, std::forward<Tail>(args)...);
+        }
+[/code]
+Y acá es donde viene la mentalidad de las listas de Haskell, definiendo el template con 2 argumentos de tipos, <code>Head</code> como uno tradicional y <code>Tail</code> como un parameter pack, es posible acceder y utilizar el primer parámetro de manera independiente. Lo que se hace en el cuerpo, enviándolo al <code>std::stringstream</code> y luego llamándose a sí misma nuevamente, pero con un elemento menos.
+&nbsp;
+<i>¿Dónde termina esto?</i>
+[code language="cpp"]
+        template<typename Head>
+        inline void concat_ss(std::stringstream& ss, Head&& h) {
+            ss << h;
+        }
+[/code]
+Otra versión de <code>concat_ss</code> que no tiene <i>cola</i>, termina la recursión y además asegura que <code>concat</code> no se puede llamar sin argumentos:
+&nbsp;
+<i>Prevenir la llamada a <code>concat</code> sin argumentos.</i>
+&nbsp;
+Dado que llamar a <code>concat</code> sin argumentos equivale a llamar a <code>concat_ss</code> sólo con el <code>std::stringstream</code> el código falla al compilar, porque solo están definidas funciones que toman exactamente 1 parámetro extra (segunda versión) o más de uno (primera versión).
+&nbsp;
+<i>Fin de la recursión</i>
+&nbsp;
+La llamada a <code>concat_ss</code> desde <code>concat</code> define una función con N argumentos, que a su vez llama a otra versión de <code>concat_ss</code> definida y recibiendo N-1 argumentos. Este proceso continúa hasta que N es igual a 2. Momento en el cuál, el primer argumento se pasa al stream y la cola, que ahora es solo 1 elemento, matchea con la versión no-recursiva y con-un-argumento-extra de <code>concat_ss</code>. Usando el ejemplo anterior:
+<ol>
+    <li><code>util::string::concat_ss(ss, "The answer is ", 42, " or maybe ", 42.5)</code> pasa al stream "The answer is " y luego se llama a sí misma,</li>
+    <li><code>util::string::concat_ss(ss, 42, " or maybe ", 42.5)</code> pasa al stream 42 y luego se llama a sí misma,</li>
+    <li><code>util::string::concat_ss(ss, " or maybe ", 42.5)</code> pasa al stream " or maybe " y luego llama a la versión no-recursiva de <code>concat_ss</code> que recibe 1 solo parámetro extra, en este caso, 42.5.</li>
+</ol>
+Creo que es todo, si hay interés en seguir leyendo sobre 'move semantics', en inglés <a href="http://stackoverflow.com/questions/3106110/what-are-move-semantics">está esta respuesta de StackOverflow</a>, explicando en extremo detalle. Como probablemente esté mejor explicado por personas como Stephan T. Lavavej (que dió input en esa respuesta de SO) o <a href="https://isocpp.org/blog/2012/11/universal-references-in-c11-scott-meyers">Scott Meyers</a>, no creo que haga un artículo completo, quizás una traducción de alguno de los articulos originales al español baste :)
+&nbsp;
+El código está <a href="https://github.com/mariano-gn/simple-logger">acá</a>. <code>concat</code> es parte de unas funciones utilitarias definidas en <code>util.h</code>. Como ves, el código para el Logger está completo, solo tengo que presentar algunos conceptos antes de presentarlo por sí solo.
+&nbsp;
+¡Saludos!
+<a href="#es">Inicio</a>
